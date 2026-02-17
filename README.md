@@ -15,7 +15,7 @@ A minimal PostgreSQL ORM built on Pydantic: define models with `Column` metadata
 
 - Python 3.8+
 - PostgreSQL (tested with psycopg2)
-- Dependencies: `pydantic>=2`, `pandas`, `psycopg2-binary`
+- Dependencies: `pydantic>=2`, `psycopg2-binary`
 
 ## Installation
 
@@ -23,29 +23,51 @@ A minimal PostgreSQL ORM built on Pydantic: define models with `Column` metadata
 pip install simpleorm
 ```
 
-## Quick start
+## Quick Start
 
 ```python
 import datetime
 from simpleorm import BaseTableModel, Column, DbUtil
 
+# Define your model
 class User(BaseTableModel):
     user_id: str = Column(primary_key=True)
     name: str = Column()
     email: str = Column(unique=True)
     created_at: datetime.datetime = Column(is_timezone_aware=True)
 
+# Connect to database
 db = DbUtil()
 db.connect()
-user = User(user_id="1", name="Jane", email="jane@example.com", created_at=datetime.datetime.now())
+
+# Create table (run once)
+ddl = User.generate_ddl_query()
+db.execute_query(ddl, commit=True)
+
+# Insert a user
+user = User(
+    user_id="1",
+    name="Jane Doe",
+    email="jane@example.com",
+    created_at=datetime.datetime.now()
+)
 user.insert(db_conn=db)
-row = User.select_one(db_conn=db, and_condition_columns=["email"], and_condition_value=["jane@example.com"])
+
+# Query users
+found_user = User.select_one(
+    db_conn=db,
+    and_condition_columns=["email"],
+    and_condition_value=["jane@example.com"]
+)
+print(found_user.name)  # "Jane Doe"
+
+# Clean up
 db.disconnect()
 ```
 
-## Usage
+## Usage Guide
 
-### Defining models
+### Defining Models
 
 Subclass `BaseTableModel` and declare fields with `Column()`. Only set the options you need:
 
@@ -55,60 +77,266 @@ from simpleorm import BaseTableModel, Column, OnDeleteFkEnum
 class Post(BaseTableModel):
     post_id: str = Column(primary_key=True)
     title: str = Column()
+    content: str = Column(nullable=True)
     author_id: str = Column(
         foreign_key_table="user",
         foreign_key_column="user_id",
         on_delete=OnDeleteFkEnum.CASCADE,
         index=True,
     )
-    created_at: datetime.datetime = Column(is_timezone_aware=True, db_default="NOW()")
+    created_at: datetime.datetime = Column(
+        is_timezone_aware=True,
+        db_default="NOW()"
+    )
+    views: int = Column(default=0)
 ```
 
-Supported `Column()` options: `default`, `db_default`, `primary_key`, `unique`, `nullable`, `index`, `index_name`, `index_type`, `index_ops`, `foreign_key_table`, `foreign_key_column`, `on_delete`, `is_timezone_aware`.
+**Supported `Column()` options:**
+- `default` - Python default value
+- `db_default` - SQL default (e.g., `"NOW()"`, `"CURRENT_TIMESTAMP"`)
+- `primary_key` - Primary key constraint
+- `unique` - Unique constraint
+- `nullable` - Allow NULL (default: `True`, except for primary keys)
+- `index` - Create an index
+- `index_name` - Custom index name
+- `index_type` - Index type (e.g., `"btree"`, `"gin"`, `"gist"`)
+- `index_ops` - Index operator class
+- `foreign_key_table` - Referenced table name
+- `foreign_key_column` - Referenced column name
+- `on_delete` - Foreign key ON DELETE action (`OnDeleteFkEnum.CASCADE`, `SET_NULL`, etc.)
+- `is_timezone_aware` - Use `TIMESTAMPTZ` instead of `TIMESTAMP`
 
-### Connection (DbUtil)
+### Database Connection
 
-Create a `DbUtil` with explicit params or rely on environment variables:
+Create a `DbUtil` with explicit parameters or rely on environment variables:
 
-- `DATABASE_HOST`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASS`, `DATABASE_PORT`
+**Using environment variables:**
+```bash
+export DATABASE_HOST=localhost
+export DATABASE_NAME=mydb
+export DATABASE_USER=postgres
+export DATABASE_PASS=password
+export DATABASE_PORT=5432
+```
 
 ```python
 db = DbUtil()
-db.connect()                    # uses env vars
-db.connect(default_schema="app")  # creates schema if needed, sets search_path
-# ... run queries ...
-db.disconnect(do_commit=True)
+db.connect()
 ```
 
-`connect()`, `commit()`, `create_schema()`, and `execute_query()` raise on failure; on success they return the result (or `None` where applicable).
+**Using explicit parameters:**
+```python
+db = DbUtil({
+    "host": "localhost",
+    "database": "mydb",
+    "user": "postgres",
+    "password": "password",
+    "port": "5432"
+})
+db.connect()
+```
 
-### DDL
+**With schema:**
+```python
+db.connect(default_schema="app")  # Creates schema if needed, sets search_path
+```
 
-Generate `CREATE TABLE` and indexes from your model:
+**Cleanup:**
+```python
+db.disconnect(do_commit=True)  # Commits before closing
+```
+
+### Creating Tables
+
+Generate and execute DDL from your models:
 
 ```python
-ddl = User.generate_ddl_query()           # includes CREATE INDEX from Column(index=True)
-index_only = User.generate_index_ddl_queries()
+# Generate CREATE TABLE statement
+ddl = User.generate_ddl_query()
+print(ddl)
+# CREATE TABLE IF NOT EXISTS user (
+#     user_id TEXT NOT NULL,
+#     name TEXT,
+#     email TEXT UNIQUE,
+#     created_at TIMESTAMPTZ DEFAULT NOW(),
+#     PRIMARY KEY (user_id)
+# );
+# CREATE INDEX IF NOT EXISTS idx_user_email ON user USING btree (email);
+
+# Execute it
+db.execute_query(ddl, commit=True)
+
+# Or generate indexes separately
+index_ddls = User.generate_index_ddl_queries()
+for index_ddl in index_ddls:
+    db.execute_query(index_ddl, commit=True)
 ```
 
-Run the DDL with `db.execute_query(ddl, commit=True)` (or your migration runner).
+### Querying Data (DQL)
 
-### Queries (DQL)
+**Select one row:**
+```python
+user = User.select_one(
+    db_conn=db,
+    and_condition_columns=["email"],
+    and_condition_value=["jane@example.com"]
+)
+# Returns User instance or None
+```
 
-- **select_one** — Returns one model instance or `None`. Use `and_condition_columns` / `and_condition_value`, or `custom_condition_query` with `custom_query_inputs`, plus optional `order_by_columns` / `order_direction`.
-- **select_many** — Same condition options, plus `group_by_columns`, `limit`, `offset`; returns a list of model instances.
+**Select multiple rows:**
+```python
+users = User.select_many(
+    db_conn=db,
+    and_condition_columns=["created_at"],
+    and_condition_value=[datetime.datetime(2024, 1, 1)],
+    order_by_columns=["created_at"],
+    order_direction="DESC",
+    limit=10
+)
+# Returns list of User instances
+```
 
-You can pass an existing `DbUtil` or omit it to use a short-lived connection (created from env).
+**Custom WHERE clause:**
+```python
+user = User.select_one(
+    db_conn=db,
+    custom_condition_query="email = %s AND created_at > %s",
+    custom_query_inputs=["jane@example.com", datetime.datetime(2024, 1, 1)]
+)
+```
 
-### Insert / update / delete (DML)
+**OR conditions:**
+```python
+users = User.select_many(
+    db_conn=db,
+    or_condition_columns=["status"],
+    or_condition_value=["active", "pending"]
+)
+```
 
-- **insert** (instance method) — Inserts the row; returns `{"query": str, "values": list}`. Use `update_on_conflict=True` for upsert; `do_not_execute=True` to only build query/values.
-- **update** (instance method) — Updates by primary key by default, or by `condition_columns` / `condition_value`. Supports `increment_columns` / `increment_value` and `decrement_columns` / `decrement_value` for numeric fields.
-- **delete** (class method) — Deletes rows matching `condition_columns` and `condition_value`; requires both.
+**Without passing db_conn:**
+```python
+# Creates a temporary connection from environment variables
+user = User.select_one(
+    and_condition_columns=["email"],
+    and_condition_value=["jane@example.com"]
+)
+```
 
-All DML methods raise on failure; on success they return `None` except `insert`, which returns the query/values dict.
+### Inserting Data (DML)
 
-## API overview
+**Basic insert:**
+```python
+user = User(
+    user_id="2",
+    name="John Doe",
+    email="john@example.com",
+    created_at=datetime.datetime.now()
+)
+user.insert(db_conn=db)  # Commits by default
+```
+
+**Upsert (insert or update on conflict):**
+```python
+user.insert(
+    db_conn=db,
+    update_on_conflict=True,
+    column_to_update_on_conflict=["name", "email"]  # Optional: specify which columns to update
+)
+```
+
+**Get query without executing:**
+```python
+result = user.insert(db_conn=db, do_not_execute=True)
+print(result["query"])   # INSERT INTO user ...
+print(result["values"])  # ['2', 'John Doe', ...]
+```
+
+### Updating Data
+
+**Update by primary key:**
+```python
+user.name = "Jane Smith"
+user.email = "jane.smith@example.com"
+user.update(db_conn=db)  # Uses primary key for WHERE clause
+```
+
+**Update with custom condition:**
+```python
+user.update(
+    db_conn=db,
+    condition_columns=["status"],
+    condition_value=["inactive"]
+)
+```
+
+**Increment/decrement numeric fields:**
+```python
+user.update(
+    db_conn=db,
+    increment_columns=["views"],
+    increment_value=[1]
+)
+
+user.update(
+    db_conn=db,
+    decrement_columns=["credits"],
+    decrement_value=[10]
+)
+```
+
+### Deleting Data
+
+```python
+User.delete(
+    db_conn=db,
+    condition_columns=["user_id"],
+    condition_value=["1"]
+)
+```
+
+### Model Introspection
+
+```python
+# Get table name
+User.get_table_name()  # "user"
+
+# Get column names
+User.get_columns()  # ["user_id", "name", "email", "created_at"]
+
+# Get primary keys
+User.get_primary_keys()  # ["user_id"]
+
+# Get foreign keys
+User.get_foreign_keys()  # [{"column": "author_id", "ref_table": "user", ...}]
+
+# Get indexes
+User.get_indexes()  # [{"name": "idx_user_email", "column": "email", ...}]
+
+# Get detailed column breakdown
+User.get_column_breakdown()  # Full metadata for each column
+
+# Get table dependencies
+Post.table_dependencies()  # ["user"] (tables this depends on)
+```
+
+### Utility Methods
+
+```python
+user = User(...)
+
+# Generate UUID
+user_id = user.gen_uid()  # "550e8400-e29b-41d4-a716-446655440000"
+
+# Convert to dict
+user_dict = user.to_dict()  # {"user_id": "1", "name": "Jane", ...}
+
+# Convert to JSON
+user_json = user.to_json()  # '{"user_id":"1","name":"Jane",...}'
+```
+
+## API Reference
 
 | Component | Description |
 |-----------|-------------|
@@ -118,33 +346,119 @@ All DML methods raise on failure; on success they return `None` except `insert`,
 | `ColumnMetadata` | Schema for column options (used internally) |
 | `OnDeleteFkEnum` | CASCADE, SET_NULL, RESTRICT, NO_ACTION for foreign keys |
 
-Introspection: `get_table_name()`, `get_columns()`, `get_primary_keys()`, `get_foreign_keys()`, `get_indexes()`, `get_column_breakdown()`, `table_dependencies()`.
+**Class methods (DDL):**
+- `generate_ddl_query(recreate=False)` - Generate CREATE TABLE statement
+- `generate_index_ddl_queries(include_if_not_exists=True)` - Generate CREATE INDEX statements
+- `get_table_name()` - Get snake_case table name
+- `get_columns()` - Get list of column names
+- `get_primary_keys()` - Get list of primary key columns
+- `get_foreign_keys()` - Get list of foreign key definitions
+- `get_indexes()` - Get list of index definitions
+- `get_column_breakdown()` - Get detailed column metadata
+- `table_dependencies()` - Get list of dependent tables
 
-## Development
+**Class methods (DQL):**
+- `select_one(...)` - Select one row, returns model instance or None
+- `select_many(...)` - Select multiple rows, returns list of model instances
+- `delete(...)` - Delete rows matching condition
 
-```bash
-git clone https://github.com/FayazRafeek/SimpleORM.git
-cd SimpleORM
-pip install -e ".[dev]"
+**Instance methods (DML):**
+- `insert(...)` - Insert this instance
+- `update(...)` - Update this instance
+
+**Instance methods (utilities):**
+- `gen_uid()` - Generate UUID string
+- `to_dict()` - Convert to dictionary
+- `to_json()` - Convert to JSON string
+
+## Examples
+
+### Complete Example
+
+```python
+import datetime
+from simpleorm import BaseTableModel, Column, DbUtil, OnDeleteFkEnum
+
+# Define models
+class User(BaseTableModel):
+    user_id: str = Column(primary_key=True)
+    username: str = Column(unique=True, index=True)
+    email: str = Column(unique=True)
+    created_at: datetime.datetime = Column(is_timezone_aware=True, db_default="NOW()")
+
+class Post(BaseTableModel):
+    post_id: str = Column(primary_key=True)
+    title: str = Column()
+    content: str = Column(nullable=True)
+    author_id: str = Column(
+        foreign_key_table="user",
+        foreign_key_column="user_id",
+        on_delete=OnDeleteFkEnum.CASCADE,
+        index=True
+    )
+    created_at: datetime.datetime = Column(is_timezone_aware=True, db_default="NOW()")
+    views: int = Column(default=0)
+
+# Setup database
+db = DbUtil()
+db.connect()
+
+# Create tables
+db.execute_query(User.generate_ddl_query(), commit=True)
+db.execute_query(Post.generate_ddl_query(), commit=True)
+
+# Create user
+user = User(
+    user_id="1",
+    username="jane_doe",
+    email="jane@example.com"
+)
+user.insert(db_conn=db)
+
+# Create post
+post = Post(
+    post_id="1",
+    title="Hello World",
+    content="My first post",
+    author_id="1"
+)
+post.insert(db_conn=db)
+
+# Query posts by author
+posts = Post.select_many(
+    db_conn=db,
+    and_condition_columns=["author_id"],
+    and_condition_value=["1"],
+    order_by_columns=["created_at"],
+    order_direction="DESC"
+)
+
+# Update views
+post.views = 10
+post.update(db_conn=db)
+
+# Increment views
+post.update(
+    db_conn=db,
+    increment_columns=["views"],
+    increment_value=[1]
+)
+
+# Find user by email
+user = User.select_one(
+    db_conn=db,
+    and_condition_columns=["email"],
+    and_condition_value=["jane@example.com"]
+)
+
+db.disconnect()
 ```
-
-Run tests:
-
-```bash
-pytest tests/
-```
-
-Optional dev deps: `build`, `twine` for releasing; `pytest`, `pytest-mock` for testing.
-
-## Publishing to PyPI
-
-1. Create an account at [pypi.org](https://pypi.org) and an [API token](https://pypi.org/manage/account/token/).
-2. `pip install build twine`
-3. `python -m build`
-4. `twine upload dist/*` (use `__token__` and your token as password, or `TWINE_USERNAME` / `TWINE_PASSWORD`).
-
-To try first: `twine upload --repository testpypi dist/*`
 
 ## License
 
 MIT
+
+## Links
+
+- **GitHub**: https://github.com/FayazRafeek/SimpleORM
+- **PyPI**: https://pypi.org/project/simpleorm/

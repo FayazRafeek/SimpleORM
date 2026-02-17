@@ -190,24 +190,6 @@ class TestDbUtil:
 
         mock_cursor.execute.assert_called_once_with("SELECT * FROM test WHERE id = %s", (1,))
 
-    @patch("simpleorm.db_util.psycopg.connect")
-    def test_execute_query_as_pd(self, mock_connect):
-        """Test query execution returning pandas DataFrame."""
-        import pandas as pd
-
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_cursor.description = [("id",), ("name",)]
-        mock_cursor.fetchall.return_value = [(1, "test"), (2, "test2")]
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-        mock_connect.return_value = mock_conn
-
-        db = DbUtil(params={"host": "localhost", "database": "test"})
-        result = db.execute_query("SELECT * FROM test", as_pd=True)
-
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 2
-        assert list(result.columns) == ["id", "name"]
 
     @patch("simpleorm.db_util.psycopg.connect")
     def test_execute_query_get_column_names(self, mock_connect):

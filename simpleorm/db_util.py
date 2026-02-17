@@ -8,9 +8,8 @@ from environment variables (e.g. ``DATABASE_HOST``, ``DATABASE_NAME``).
 
 import logging
 import os
-from typing import Dict, Type, Union
+from typing import Dict, List, Type, Union, Any
 
-import pandas as pd
 import psycopg2 as psycopg
 
 logger = logging.getLogger("simpleorm.db_util")
@@ -107,14 +106,13 @@ class DbUtil:
         self,
         query: str,
         table_name: str = None,
-        as_pd: bool = False,
         data: tuple = None,
         table_schema: str = None,
         commit: bool = False,
         no_fetch: bool = False,
         get_column_names: bool = False,
         hide_query_execution_log: bool = True,
-    ) -> Union[None, list, pd.DataFrame]:
+    ) -> Union[None, list, List[Dict[str, Any]]]:
         """
         Execute a query with optional parameters and return format options.
 
@@ -124,12 +122,11 @@ class DbUtil:
             table_schema: If connection is not open, connect with this as default_schema.
             commit: If True, commit after execution.
             no_fetch: If True, do not fetch results (e.g. INSERT/UPDATE); returns None.
-            as_pd: If True, return result as a :class:`pandas.DataFrame`.
             get_column_names: If True, return list of dicts (column name -> value).
             hide_query_execution_log: If False, log the executed query.
 
         Returns:
-            Rows as list, list of dicts, or DataFrame per options; None if no_fetch.
+            Rows as list of tuples, or list of dicts if get_column_names=True; None if no_fetch.
         Raises:
             Exception: On execution or commit failure.
         """
@@ -153,10 +150,6 @@ class DbUtil:
                     return None
 
                 result = cursor.fetchall()
-
-                if as_pd:
-                    column_names = [desc[0] for desc in cursor.description]
-                    return pd.DataFrame(result, columns=column_names)
 
                 if get_column_names:
                     column_names = [desc[0] for desc in cursor.description]
