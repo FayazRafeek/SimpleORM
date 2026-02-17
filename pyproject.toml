@@ -9,6 +9,11 @@ description = "A simple ORM library"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.8"
+dependencies = [
+    "pydantic>=2",
+    "pandas",
+    "psycopg2-binary",
+]
 authors = [
     { name = "Your Name", email = "your.email@example.com" }
 ]

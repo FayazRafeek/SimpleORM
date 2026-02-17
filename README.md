@@ -11,9 +11,21 @@ pip install simpleorm
 ## Usage
 
 ```python
-import simpleorm
+import datetime
+from simpleorm import BaseTableModel, Column, DbUtil
 
-print(simpleorm.__version__)
+class User(BaseTableModel):
+    user_id: str = Column(primary_key=True)
+    name: str = Column()
+    email: str = Column(unique=True)
+    created_at: datetime.datetime = Column(is_timezone_aware=True)
+
+db = DbUtil()
+db.connect()
+user = User(user_id="1", name="Jane", email="jane@example.com", created_at=datetime.datetime.now())
+user.insert(db_conn=db)
+row = User.select_one(db_conn=db, and_condition_columns=["email"], and_condition_value=["jane@example.com"])
+db.disconnect()
 ```
 
 ## Development
