@@ -1,5 +1,9 @@
 """
-Utility for DB connection and query execution.
+PostgreSQL connection and query execution utilities.
+
+This module provides :class:`DbUtil` for managing connections and running
+parameterized SQL. Connection parameters can be passed explicitly or read
+from environment variables (e.g. ``DATABASE_HOST``, ``DATABASE_NAME``).
 """
 
 import logging
@@ -15,9 +19,23 @@ ConnectionType: Type[psycopg.extensions.connection] = psycopg.extensions.connect
 
 
 class DbUtil:
+    """
+    PostgreSQL connection manager and query executor.
+
+    Uses psycopg2 under the hood. Parameters not provided in ``params``
+    fall back to environment variables: ``DATABASE_HOST``, ``DATABASE_NAME``,
+    ``DATABASE_USER``, ``DATABASE_PASS``, ``DATABASE_PORT``.
+
+    On success, methods return the result (or None); on failure they log
+    and raise (e.g. :exc:`RuntimeError`).
+    """
+
     connection: Type[psycopg.extensions.connection] = None
 
     def __init__(self, params: Dict = None):
+        """
+        Build connection params from ``params`` and env (e.g. DATABASE_*).
+        """
         params = params or {}
         self.connection_params = {
             "host": params.get("host") or os.getenv("DATABASE_HOST"),
@@ -29,6 +47,10 @@ class DbUtil:
         self.connection = None
 
     def connect(self, default_schema: str = None) -> None:
+        """
+        Open a connection. If ``default_schema`` is set, create the schema
+        if needed and set the connection's search_path. Raises on failure.
+        """
         try:
             if default_schema:
                 self.create_schema(default_schema)
@@ -40,6 +62,9 @@ class DbUtil:
             raise RuntimeError("Failed to create DB Connection") from error
 
     def disconnect(self, do_commit: bool = False) -> None:
+        """
+        Close the connection. If ``do_commit`` is True, commit before closing.
+        """
         try:
             if self.connection:
                 if do_commit:
@@ -49,6 +74,9 @@ class DbUtil:
             pass
 
     def commit(self) -> None:
+        """
+        Commit the current transaction. Raises if there is no connection or commit fails.
+        """
         if not self.connection:
             raise RuntimeError("No connection found to commit")
         try:
@@ -58,6 +86,9 @@ class DbUtil:
             raise
 
     def create_schema(self, schema: str) -> None:
+        """
+        Create schema ``schema`` (IF NOT EXISTS). Connects first if needed. Raises on failure.
+        """
         try:
             if not self.connection:
                 self.connect()
@@ -84,6 +115,24 @@ class DbUtil:
         get_column_names: bool = False,
         hide_query_execution_log: bool = True,
     ) -> Union[None, list, pd.DataFrame]:
+        """
+        Execute a query with optional parameters and return format options.
+
+        Args:
+            query: SQL string; use ``%s`` placeholders when passing ``data``.
+            data: Tuple of values for placeholders (parameterized execution).
+            table_schema: If connection is not open, connect with this as default_schema.
+            commit: If True, commit after execution.
+            no_fetch: If True, do not fetch results (e.g. INSERT/UPDATE); returns None.
+            as_pd: If True, return result as a :class:`pandas.DataFrame`.
+            get_column_names: If True, return list of dicts (column name -> value).
+            hide_query_execution_log: If False, log the executed query.
+
+        Returns:
+            Rows as list, list of dicts, or DataFrame per options; None if no_fetch.
+        Raises:
+            Exception: On execution or commit failure.
+        """
         if not self.connection:
             self.connect(table_schema)
 

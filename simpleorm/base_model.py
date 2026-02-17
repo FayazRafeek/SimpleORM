@@ -1,5 +1,11 @@
 """
-Base table model for defining Pydantic-backed ORM models with DDL/DQL/DML helpers.
+Pydantic-based table models with PostgreSQL DDL, DQL, and DML helpers.
+
+Define models by subclassing :class:`BaseTableModel` and using :func:`Column`
+for field metadata (primary keys, indexes, foreign keys, etc.). Table names
+are derived from class names (PascalCase -> snake_case). Use :class:`DbUtil`
+for connections; model methods accept an optional ``db_conn`` or create one
+from environment variables.
 """
 
 import datetime
@@ -19,6 +25,8 @@ T = TypeVar("T", bound="BaseTableModel")
 
 
 class OnDeleteFkEnum(Enum):
+    """Foreign key ON DELETE action for PostgreSQL."""
+
     CASCADE = "CASCADE"
     SET_NULL = "SET NULL"
     RESTRICT = "RESTRICT"
@@ -26,6 +34,11 @@ class OnDeleteFkEnum(Enum):
 
 
 class ColumnMetadata(BaseModel):
+    """
+    Metadata for a table column (stored in Pydantic Field metadata).
+    Used by :func:`Column` and by :class:`BaseTableModel` for DDL and introspection.
+    """
+
     db_default: Optional[Any] = None
     index: Optional[bool] = False
     index_name: Optional[str] = None
@@ -55,6 +68,17 @@ def Column(
     is_timezone_aware: Optional[bool] = False,
     on_delete: Optional[OnDeleteFkEnum] = None,
 ) -> Any:
+    """
+    Declare a table column with optional DB metadata (primary key, index, FK, etc.).
+
+    Returns a Pydantic :class:`Field` with metadata consumed by :class:`BaseTableModel`
+    for :meth:`BaseTableModel.generate_ddl_query` and introspection. Example::
+
+        class User(BaseTableModel):
+            user_id: str = Column(primary_key=True)
+            email: str = Column(unique=True, index=True)
+            created_at: datetime.datetime = Column(is_timezone_aware=True)
+    """
     metadata_dict = ColumnMetadata(
         db_default=db_default,
         index=index,
@@ -73,15 +97,26 @@ def Column(
 
 
 class BaseTableModel(BaseModel, extra="allow"):
+    """
+    Base class for table models: Pydantic models with PostgreSQL DDL/DQL/DML helpers.
+
+    Subclass and define fields with :func:`Column`. Table name is inferred from
+    the class name (e.g. ``UserProfile`` -> ``user_profile``). Use class methods
+    for DDL (generate_ddl_query, generate_index_ddl_queries), DQL (select_one,
+    select_many), and DML (delete); use instance methods for insert/update.
+    """
+
     model_config = ConfigDict(ser_json_timedelta="iso8601")
     _is_backlogged_table: bool = False
 
     @classmethod
     def is_backlogged_table(cls) -> bool:
+        """Return whether this table is marked as backlogged (e.g. not in releases)."""
         return cls._is_backlogged_table
 
     @staticmethod
     def format_value(value: Any) -> Any:
+        """Format a Python value for SQL (e.g. timedelta -> interval string, dict -> JSON)."""
         if isinstance(value, str):
             return f"{value}"
         elif isinstance(value, list):
@@ -104,6 +139,7 @@ class BaseTableModel(BaseModel, extra="allow"):
 
     @staticmethod
     def classname_to_table_name(classname: str) -> str:
+        """Convert PascalCase class name to snake_case table name."""
         table_name = classname[0].lower()
         for char in classname[1:]:
             if char.isupper():
@@ -115,6 +151,7 @@ class BaseTableModel(BaseModel, extra="allow"):
     def get_db_type(
         python_type: Any, metadata: Optional[ColumnMetadata] = None
     ) -> str:
+        """Map a Python type (including Optional, List, Dict) to a PostgreSQL type name."""
         type_mapping = {
             str: "TEXT",
             int: "INTEGER",
@@ -156,10 +193,12 @@ class BaseTableModel(BaseModel, extra="allow"):
 
     @classmethod
     def get_table_name(cls) -> str:
+        """Return the table name for this model (snake_case from class name)."""
         return cls.classname_to_table_name(cls.__name__)
 
     @classmethod
     def get_columns(cls) -> List[str]:
+        """Return the list of column names."""
         return list(cls.__annotations__.keys())
 
     @classmethod
@@ -177,6 +216,7 @@ class BaseTableModel(BaseModel, extra="allow"):
 
     @classmethod
     def get_foreign_keys(cls) -> List[Dict[str, str]]:
+        """Return list of dicts with keys: column, ref_table, ref_column."""
         foreign_keys = []
         for name in cls.__annotations__:
             if (
@@ -196,6 +236,7 @@ class BaseTableModel(BaseModel, extra="allow"):
 
     @classmethod
     def get_indexes(cls) -> List[Dict[str, Any]]:
+        """Return list of index definitions: name, column, type, table."""
         indexes = []
         for name in cls.__annotations__:
             if (
@@ -219,6 +260,7 @@ class BaseTableModel(BaseModel, extra="allow"):
 
     @classmethod
     def get_column_breakdown(cls) -> List[Dict[str, Any]]:
+        """Return per-column metadata: name, type, nullable, default, ref_table, indexes, etc."""
         column_breakdown = []
         for name in cls.__annotations__:
             metadata = (
@@ -253,6 +295,10 @@ class BaseTableModel(BaseModel, extra="allow"):
 
     @classmethod
     def generate_ddl_query(cls, recreate: bool = False) -> str:
+        """
+        Generate CREATE TABLE (and CREATE INDEX) DDL for this model.
+        If recreate is True, omit IF NOT EXISTS. Includes indexes from Column metadata.
+        """
         columns = []
         primary_keys = []
         foreign_keys = []
@@ -322,6 +368,7 @@ class BaseTableModel(BaseModel, extra="allow"):
     def generate_index_ddl_queries(
         cls, include_if_not_exists: bool = True
     ) -> List[str]:
+        """Generate CREATE INDEX statements for all columns with index=True."""
         index_queries = []
         for name in cls.__annotations__:
             metadata = None
@@ -344,6 +391,7 @@ class BaseTableModel(BaseModel, extra="allow"):
 
     @classmethod
     def table_dependencies(cls) -> List[str]:
+        """Return table names this model depends on via foreign keys (excluding self)."""
         dependencies = []
         table_name = cls.get_table_name()
         for name in cls.__annotations__:
@@ -373,6 +421,10 @@ class BaseTableModel(BaseModel, extra="allow"):
         order_by_columns: List[str] = None,
         order_direction: str = "ASC",
     ) -> Optional[T]:
+        """
+        Select at most one row; returns a model instance or None.
+        Supports and_condition_*, or_condition_*, custom_condition_query, order_by.
+        """
         db_created_here = False
         if db_conn is None:
             db_conn = DbUtil()
@@ -453,6 +505,10 @@ class BaseTableModel(BaseModel, extra="allow"):
         limit: int = None,
         offset: int = None,
     ) -> List[T]:
+        """
+        Select multiple rows; returns a list of model instances.
+        Supports and/or/custom conditions, group_by, order_by, limit, offset.
+        """
         db_created_here = False
         if db_conn is None:
             db_conn = DbUtil()
@@ -530,6 +586,10 @@ class BaseTableModel(BaseModel, extra="allow"):
         condition_columns: List[str] = None,
         condition_value: List[Any] = None,
     ) -> None:
+        """
+        Delete rows matching condition_columns = condition_value.
+        If no condition given, raises ValueError. Commits if self_commit is True.
+        """
         db_created_here = False
         if db_conn is None:
             db_conn = DbUtil()
@@ -564,6 +624,11 @@ class BaseTableModel(BaseModel, extra="allow"):
         column_to_update_on_conflict: List[str] = None,
         do_not_execute: bool = False,
     ) -> Dict[str, Any]:
+        """
+        Insert this instance. Returns {"query": str, "values": list}.
+        update_on_conflict: use ON CONFLICT (pk) DO UPDATE for upsert.
+        do_not_execute: only build and return query/values.
+        """
         db_created_here = False
         if db_conn is None:
             db_conn = DbUtil()
@@ -629,6 +694,10 @@ class BaseTableModel(BaseModel, extra="allow"):
         decrement_columns: List[str] = None,
         decrement_value: List[Union[int, float]] = None,
     ) -> None:
+        """
+        Update row(s). By default condition is primary key = current instance values.
+        increment_columns / decrement_columns apply numeric +/- (CASE WHEN NULL THEN value ELSE col +/- value).
+        """
         db_created_here = False
         if db_conn is None:
             db_conn = DbUtil()
@@ -694,10 +763,13 @@ class BaseTableModel(BaseModel, extra="allow"):
                 db_conn.disconnect(do_commit=self_commit)
 
     def gen_uid(self) -> str:
+        """Return a new UUID string (e.g. for primary keys)."""
         return str(uuid.uuid4())
 
     def to_dict(self) -> dict:
+        """Return model as dict with only set fields."""
         return self.model_dump(exclude_unset=True)
 
     def to_json(self) -> str:
+        """Return model as JSON string (only set fields)."""
         return self.model_dump_json(exclude_unset=True)
