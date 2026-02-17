@@ -461,4 +461,3 @@ MIT
 ## Links
 
 - **GitHub**: https://github.com/FayazRafeek/SimpleORM
-- **PyPI**: https://pypi.org/project/simpleorm/
