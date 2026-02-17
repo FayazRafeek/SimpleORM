@@ -93,7 +93,7 @@ def Column(
         is_timezone_aware=is_timezone_aware,
         on_delete=on_delete,
     ).model_dump(exclude_unset=True)
-    return Field(default=default, metadata=[metadata_dict])
+    return Field(default=default, json_schema_extra={"column_metadata": metadata_dict})
 
 
 class BaseTableModel(BaseModel, extra="allow"):
@@ -205,11 +205,13 @@ class BaseTableModel(BaseModel, extra="allow"):
     def get_primary_keys(cls) -> List[str]:
         primary_keys = []
         for name in cls.__annotations__:
+            field_info = cls.model_fields[name]
             if (
-                hasattr(cls.model_fields[name], "metadata")
-                and len(cls.model_fields[name].metadata) > 0
+                hasattr(field_info, "json_schema_extra")
+                and isinstance(field_info.json_schema_extra, dict)
+                and "column_metadata" in field_info.json_schema_extra
             ):
-                metadata = ColumnMetadata(**cls.model_fields[name].metadata[0])
+                metadata = ColumnMetadata(**field_info.json_schema_extra["column_metadata"])
                 if metadata.primary_key:
                     primary_keys.append(name)
         return primary_keys
@@ -219,11 +221,13 @@ class BaseTableModel(BaseModel, extra="allow"):
         """Return list of dicts with keys: column, ref_table, ref_column."""
         foreign_keys = []
         for name in cls.__annotations__:
+            field_info = cls.model_fields[name]
             if (
-                hasattr(cls.model_fields[name], "metadata")
-                and len(cls.model_fields[name].metadata) > 0
+                hasattr(field_info, "json_schema_extra")
+                and isinstance(field_info.json_schema_extra, dict)
+                and "column_metadata" in field_info.json_schema_extra
             ):
-                metadata = ColumnMetadata(**cls.model_fields[name].metadata[0])
+                metadata = ColumnMetadata(**field_info.json_schema_extra["column_metadata"])
                 if metadata.foreign_key_table is not None:
                     foreign_keys.append(
                         {
@@ -239,11 +243,13 @@ class BaseTableModel(BaseModel, extra="allow"):
         """Return list of index definitions: name, column, type, table."""
         indexes = []
         for name in cls.__annotations__:
+            field_info = cls.model_fields[name]
             if (
-                hasattr(cls.model_fields[name], "metadata")
-                and len(cls.model_fields[name].metadata) > 0
+                hasattr(field_info, "json_schema_extra")
+                and isinstance(field_info.json_schema_extra, dict)
+                and "column_metadata" in field_info.json_schema_extra
             ):
-                metadata = ColumnMetadata(**cls.model_fields[name].metadata[0])
+                metadata = ColumnMetadata(**field_info.json_schema_extra["column_metadata"])
                 if metadata.index:
                     index_name = (
                         metadata.index_name or f"idx_{cls.get_table_name()}_{name}"
@@ -263,12 +269,14 @@ class BaseTableModel(BaseModel, extra="allow"):
         """Return per-column metadata: name, type, nullable, default, ref_table, indexes, etc."""
         column_breakdown = []
         for name in cls.__annotations__:
-            metadata = (
-                ColumnMetadata(**cls.model_fields[name].metadata[0])
-                if hasattr(cls.model_fields[name], "metadata")
-                and len(cls.model_fields[name].metadata) > 0
-                else None
-            )
+            field_info = cls.model_fields[name]
+            metadata = None
+            if (
+                hasattr(field_info, "json_schema_extra")
+                and isinstance(field_info.json_schema_extra, dict)
+                and "column_metadata" in field_info.json_schema_extra
+            ):
+                metadata = ColumnMetadata(**field_info.json_schema_extra["column_metadata"])
             column_breakdown.append(
                 {
                     "name": name,
@@ -305,12 +313,14 @@ class BaseTableModel(BaseModel, extra="allow"):
 
         for name in cls.__annotations__:
             constraints = []
+            field_info = cls.model_fields[name]
             metadata = None
             if (
-                hasattr(cls.model_fields[name], "metadata")
-                and len(cls.model_fields[name].metadata) > 0
+                hasattr(field_info, "json_schema_extra")
+                and isinstance(field_info.json_schema_extra, dict)
+                and "column_metadata" in field_info.json_schema_extra
             ):
-                metadata = ColumnMetadata(**cls.model_fields[name].metadata[0])
+                metadata = ColumnMetadata(**field_info.json_schema_extra["column_metadata"])
 
             db_type = cls.get_db_type(cls.__annotations__[name], metadata)
 
@@ -371,12 +381,14 @@ class BaseTableModel(BaseModel, extra="allow"):
         """Generate CREATE INDEX statements for all columns with index=True."""
         index_queries = []
         for name in cls.__annotations__:
+            field_info = cls.model_fields[name]
             metadata = None
             if (
-                hasattr(cls.model_fields[name], "metadata")
-                and len(cls.model_fields[name].metadata) > 0
+                hasattr(field_info, "json_schema_extra")
+                and isinstance(field_info.json_schema_extra, dict)
+                and "column_metadata" in field_info.json_schema_extra
             ):
-                metadata = ColumnMetadata(**cls.model_fields[name].metadata[0])
+                metadata = ColumnMetadata(**field_info.json_schema_extra["column_metadata"])
 
             if metadata is not None and metadata.index:
                 index_name = metadata.index_name or f"idx_{cls.get_table_name()}_{name}"
@@ -395,11 +407,13 @@ class BaseTableModel(BaseModel, extra="allow"):
         dependencies = []
         table_name = cls.get_table_name()
         for name in cls.__annotations__:
+            field_info = cls.model_fields[name]
             if (
-                hasattr(cls.model_fields[name], "metadata")
-                and len(cls.model_fields[name].metadata) > 0
+                hasattr(field_info, "json_schema_extra")
+                and isinstance(field_info.json_schema_extra, dict)
+                and "column_metadata" in field_info.json_schema_extra
             ):
-                metadata = ColumnMetadata(**cls.model_fields[name].metadata[0])
+                metadata = ColumnMetadata(**field_info.json_schema_extra["column_metadata"])
                 if (
                     metadata.foreign_key_table is not None
                     and metadata.foreign_key_table != table_name

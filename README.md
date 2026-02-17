@@ -128,7 +128,13 @@ cd SimpleORM
 pip install -e ".[dev]"
 ```
 
-Optional dev deps: `build`, `twine` for releasing.
+Run tests:
+
+```bash
+pytest tests/
+```
+
+Optional dev deps: `build`, `twine` for releasing; `pytest`, `pytest-mock` for testing.
 
 ## Publishing to PyPI
 
